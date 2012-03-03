@@ -8,97 +8,68 @@ import xbmcaddon
 
 from xml.dom.minidom import parse, parseString
 
-CATEGORY_URL = "http://www.expressen.se/Handlers/WebTvHandler.ashx?id=8793&output=MenuOutput"
-HANDLER_URL = "http://www.expressen.se/Handlers/WebTvHandler.ashx?id="
+PLAYLIST_URL = "http://hd.se/services/play/playlist.xml?id=<id>"
+ARCHIVE_URL = "http://hd.se/services/play/settings.xml?type=archive"
+BASE_URL = "rtmp://fl1.c01040.cdn.qbrick.com/01040/_definst_/"
+FOLDER_NAME = "24hd/"
 
-__settings__ = xbmcaddon.Addon(id='plugin.video.expressentv')
+__settings__ = xbmcaddon.Addon(id='plugin.video.24hd')
 
-def list_categories():
-    doc, state = load_xml(CATEGORY_URL)
+def list_programs():
+    doc, state = load_xml(ARCHIVE_URL)
     if doc and not state:
-        add_posts("Sök", MODE + "search/", isFolder=True)
-        for category in doc.getElementsByTagName("category"):
-            title = get_node_value(category, "title").encode('utf_8')
-            categoryid = get_node_value(category, "id").encode('utf_8')
-            add_posts(title, MODE + "category/" + categoryid, isFolder=True)
-            subcategories = category.getElementsByTagName("subcategories")
-            if subcategories != None and len(subcategories) > 0: 
-                for subcategory in subcategories[0].getElementsByTagName("subcategory"):
-                    title = get_node_value(subcategory, "title").encode('utf_8')
-                    categoryid = get_node_value(subcategory, "id").encode('utf_8')
-                    add_posts(title, MODE + "category/" + categoryid, isFolder=True)
+        url = sys.argv[0]
+        settings = doc.getElementsByTagName("settings")[0]
+        setting = settings.getElementsByTagName("setting")[0]
+        allcategories = setting.getElementsByTagName("categories")
+        for categories in allcategories:
+            if categories.parentNode.tagName=="setting":
+                for program in categories.getElementsByTagName("category"):
+                    categoryid = program.getAttribute("id").encode('utf_8')
+                    date = program.getAttribute("latest").encode('utf_8')
+                    title = program.childNodes[0].data.encode('utf_8')
+                    add_posts(title, url + "category/" + categoryid, isFolder=True)
     else:
         if state == "site":
-            xbmc.executebuiltin('Notification("Expressen TV","Site down")')
+            xbmc.executebuiltin('Notification("24HD","Site down")')
         else:
-            xbmc.executebuiltin('Notification("Expressen TV","Malformed result")')
+            xbmc.executebuiltin('Notification("24HD","Malformed result")')
     xbmcplugin.endOfDirectory(HANDLE)
 
-def list_category(categoryid, extraparam = ''):
-    categoryurl = HANDLER_URL + categoryid + extraparam
-    print "url: " + categoryurl
-    doc, state = load_xml(categoryurl)
-    if doc and not state:
-        items = doc.getElementsByTagName("items")
-        for item in items[0].getElementsByTagName("item"):
-            title = get_node_value(item, "title").encode('utf_8')
-            itemid = get_node_value(item, "id").encode('utf_8')
-            thumbs = item.getElementsByTagName("thumbs")
-            thumbUrl = ""
-            maxSize = 0
-            if thumbs != None and len(thumbs) > 0:
-                for thumb in thumbs[0].getElementsByTagName("thumb"):
-                    size = int(thumb.getAttribute("size"))
-                    if size > maxSize:
-                        thumbUrl = thumb.childNodes[0].data
-                        maxSize = size
-            add_posts(title, MODE + "/play/" + itemid, thumb=thumbUrl)
-    else:
-        if state == "site":
-            xbmc.executebuiltin('Notification("Expressen TV","Site down")')
-        else:
-            xbmc.executebuiltin('Notification("Expressen TV","Malformed result")')
-    xbmcplugin.endOfDirectory(HANDLE)
-
-def play_clip(clipid):
-    url = HANDLER_URL + clipid
+def list_program(categoryid):
+    rand = "864.2308372071875"
+    url = PLAYLIST_URL.replace("<id>", categoryid)
+    url = url.replace("<rand>", rand)
+    if categoryid == "0":
+        url = url + "&date=playlist"
     doc, state = load_xml(url)
     if doc and not state:
-        root = doc.getElementsByTagName("root")[0]
-        title = get_node_value(root, "title").encode('utf_8')
-        description = get_node_value(root, "desc")
-        if description == None:
+        playlist = doc.getElementsByTagName("playlist")[0]
+        category = playlist.getAttribute("title")
+        for item in playlist.getElementsByTagName("item"):
+            itemid = item.getAttribute("id")
+            title = get_node_value(item, "title").encode('utf_8')
+            thumb = get_node_value(item, "image")
+            date = get_node_value(item, "pubdate")
+            description = get_node_value(item, "introduction")
+            if description != None:
+                description = description.encode('utf_8')
             description = ""
-        else:
-            description = description.encode('utf_8')
-        vurls = doc.getElementsByTagName("vurls")
-        maxbitrate = 0
-        url = ""
-        for vurl in vurls[0].getElementsByTagName("vurl"):
-            bitrate = int(vurl.getAttribute("bitrate"))
-            if bitrate > maxbitrate:
-                url = vurl.childNodes[0].data
-                maxbitrate = bitrate
-        parts = url.split("/")
-        print "playurl: " + url
-        for p in parts:
-            print p
-        rtmpUrl = parts[0] + "/" + parts[1] + "/" + parts[2] + "/" + parts[3]
-        playPath = ""
-        for i in range(4, len(parts)):
-            if playPath == "":
-                playPath = parts[i]
-            else:
-                playPath = playPath + "/" + parts[i]
-        url = rtmpUrl + " swfVfy=true swfUrl=http://www.expressen.se/Static/swf/ExpPlayer.swf app=" + parts[3] + " pageUrl=http://www.expressen.se playPath=" + playPath + " flashVer=LNX 11,1,102,62"
-        listitem = xbmcgui.ListItem(label=title, path=url)
-        xbmcplugin.setResolvedUrl(HANDLE, succeeded=True, listitem=listitem)  
+            subitems = item.getElementsByTagName("subitems")[0]
+            for subitem in subitems.getElementsByTagName("subitem"):
+                clip = subitem.getElementsByTagName("clip")[0]
+                prefix = clip.getAttribute("prefix")
+                clipname = clip.childNodes[0].data.encode('utf_8')
+                #TODO: create captions file?
+                url = BASE_URL + prefix + FOLDER_NAME + clipname
+                url = url.encode('utf_8')
+                add_posts(title, url, description, thumb)
     else:
         if state == "site":
-            xbmc.executebuiltin('Notification("Expressen TV","Site down")')
+            xbmc.executebuiltin('Notification("24HD","Site down")')
         else:
-            xbmc.executebuiltin('Notification("Expressen TV","Malformed result")')
-
+            xbmc.executebuiltin('Notification("24HD","Malformed result")')
+    xbmcplugin.endOfDirectory(HANDLE)
 
 def add_posts(title, url, description='', thumb='', isPlayable='true', isFolder=False):
     if title == None:
@@ -117,14 +88,6 @@ def add_posts(title, url, description='', thumb='', isPlayable='true', isFolder=
     listitem.setPath(url)
     return xbmcplugin.addDirectoryItem(HANDLE, url=url, listitem=listitem, isFolder=isFolder)
 
-def do_search():
-    keyb = xbmc.Keyboard('', 'Search')
-    keyb.doModal()
-    if (keyb.isConfirmed()):
-        search = keyb.getText()
-        print "Searching for: " + search
-        list_category("8773", "&search=" + search)
-
 
 def get_node_value(parent, name, ns=""):
 	if ns:
@@ -142,7 +105,7 @@ def load_xml(url):
         req = urllib2.Request(url)
         response = urllib2.urlopen(req)
     except urllib2.HTTPError as e:
-        xbmc.log("plugin.video.expressentv: unable to load url: " + url)
+        xbmc.log("plugin.video.24hd: unable to load url: " + url)
         xbmc.log(str(e))
         return None, "site"
     xml = response.read()
@@ -150,7 +113,7 @@ def load_xml(url):
     try:
         out = parseString(xml)
     except:
-        xbmc.log("plugin.video.expressentv: malformed xml from url: " + url)
+        xbmc.log("plugin.video.24hd: malformed xml from url: " + url)
         return None, "xml"
     return out, None
 
@@ -168,17 +131,13 @@ if (__name__ == "__main__" ):
     print "3:" + modes[3]
 
     activemode = modes[len(modes) - 2]
-    itemid = modes[len(modes) - 1]
+    category = modes[len(modes) - 1]
     print "ac: " + activemode
-    print "cat: " + itemid
+    print "cat: " + category
     
     if activemode == "category" :
-        list_category(itemid)
-    elif activemode == "play":
-        play_clip(itemid)
-    elif activemode == "search":
-        do_search()
+        list_program(category)
     else :
-        list_categories()
+        list_programs()
 
 
